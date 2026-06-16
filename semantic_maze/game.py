@@ -17,7 +17,7 @@ from .models import (
     DIRECTIONS, DIRECTION_NAMES, DIRECTION_OPPOSITES,
 )
 from .level_loader import LevelLoader
-from .storage import SaveManager, LeaderboardManager
+from .storage import SaveManager, LeaderboardManager, LevelProfileManager, LevelChecker, LevelManager
 from . import ui
 from .ui import c
 from . import default_level
@@ -119,6 +119,11 @@ class Game:
             'ls': self._cmd_saves,
             'clear': self._cmd_clear,
             'cls': self._cmd_clear,
+            'checklevel': self._cmd_checklevel,
+            'check': self._cmd_checklevel,
+            'profile': self._cmd_profiles,
+            'profiles': self._cmd_profiles,
+            'stats': self._cmd_profiles,
         }
 
         handler = command_map.get(cmd)
@@ -240,9 +245,20 @@ class Game:
             self._start_custom_level(args)
             return
 
+        custom_levels = LevelManager.list_level_files()
+
         ui.title("开始新游戏")
         print("  请选择关卡:")
-        print(c("    1. ", ui.Color.YELLOW) + "默认关卡：古老图书馆的秘密")
+        print(c("    1. ", ui.Color.YELLOW) + "默认关卡：古老图书馆的秘密" +
+              c("  (内置)", ui.Color.DIM))
+        idx = 2
+        for lv in custom_levels:
+            room_info = f"{lv.get('room_count', 0)}房间"
+            size_info = f"{lv.get('size_kb', 0):.1f}KB"
+            name_display = lv.get('level_name', lv['filename'])
+            print(c(f"    {idx}. ", ui.Color.YELLOW) + f"{name_display}" +
+                  c(f"  [{lv['filename']}] ({room_info}, {size_info})", ui.Color.DIM))
+            idx += 1
         print()
 
         choice = input("  选择 [1]: ").strip() or "1"
@@ -251,22 +267,53 @@ class Game:
             level_data = default_level.get_default_level()
             self.level = LevelLoader.load_from_dict(level_data)
             self.custom_level_path = None
+        elif choice.isdigit():
+            ci = int(choice)
+            if 2 <= ci < idx:
+                lv = custom_levels[ci - 2]
+                self._start_custom_level(lv['path'])
+                return
+            else:
+                ui.error("无效的选择编号。")
+                return
+        elif os.path.exists(choice):
+            self._start_custom_level(choice)
+            return
         else:
-            ui.error("无效的选择。")
+            ui.error("无效的输入，请输入关卡编号或文件路径。")
             return
 
         if not self.level:
-            ui.error("关卡加载失败。")
+            result = LevelChecker.check_file(os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                "semantic_maze", "default_level.py"
+            ))
+            ui.error(f"默认关卡加载失败: {result.get('errors', ['未知错误'])[0]}")
             return
 
         self._init_new_game()
 
     def _start_custom_level(self, file_path: str):
         """从自定义文件开始新游戏"""
+        check_result = LevelChecker.check_file(file_path)
+        if not check_result['valid']:
+            ui.warn("检测到关卡存在问题:")
+            for err in check_result['errors'][:5]:
+                ui.error(err.replace("❌ ", "", 1))
+            if len(check_result['errors']) > 5:
+                ui.warn(f"还有 {len(check_result['errors']) - 5} 个错误未显示")
+            ui.warn("继续尝试加载...")
+
         self.level = LevelLoader.load_from_file(file_path)
         if not self.level:
-            ui.error(f"无法加载关卡文件: {file_path}")
+            ui.separator()
+            ui.error("关卡加载失败！以下是问题详情：")
+            print(LevelChecker.format_report(check_result))
             return
+
+        if not check_result['valid']:
+            ui.warn(f"关卡已加载，但仍存在 {len(check_result['errors'])} 个错误，游玩中可能遇到问题。")
+
         self.custom_level_path = file_path
         self._init_new_game()
 
@@ -291,6 +338,27 @@ class Game:
                 m.triggered = False
 
         self._start_timer()
+
+        profile = LevelProfileManager.update_profile_on_start(self.level.id, self.level.name)
+        if profile.get('completion_count', 0) > 0:
+            ui.hint(f"这是你第 {profile['play_count']} 次挑战此关。")
+            best = profile.get('best_score', 0)
+            if best:
+                self._format_time = lambda s: (
+                    f"{int(s//60)}分{int(s%60)}秒" if s < 3600
+                    else f"{int(s//3600)}时{int(s%3600//60)}分"
+                )
+                best_steps = profile.get('best_steps')
+                best_time = profile.get('best_time')
+                best_str = f"最佳得分 {best}"
+                if best_steps:
+                    best_str += f" | 最少步数 {best_steps}"
+                if best_time:
+                    best_str += f" | 最快用时 {self._format_time(best_time)}"
+                ui.info(f"历史纪录: {best_str}")
+                ui.info("加油，看看能否刷新纪录！")
+        elif profile.get('play_count', 1) == 1:
+            ui.hint("首次挑战此关卡，祝你好运！")
 
         ui.title(f"{self.level.name}")
         if self.level.description:
@@ -515,6 +583,9 @@ class Game:
         if first_visit:
             self.visited_rooms.append(room_id)
             room.visited = True
+            LevelProfileManager.record_discovery(
+                self.level.id, [room_id], [p.id for p in room.puzzles if p.solved]
+            )
 
         if show_desc:
             ui.display_room(room, self.level, first_visit=first_visit)
@@ -808,21 +879,92 @@ class Game:
         ui.warn("答案不正确，再想想？")
 
     def _cmd_note(self, args: str):
-        """记录笔记"""
+        """记录笔记 / 删除笔记 / 搜索笔记"""
         if not self._require_playing():
             return
+
         if not args:
-            ui.error("请输入笔记内容。用法: note <内容>")
+            ui.error("用法: note <内容> 添加笔记, note del <编号> 删除, note search <关键词> 搜索")
+            ui.info("查看所有笔记: notes 或 note list")
+            return
+
+        parts = args.split(maxsplit=1)
+        subcmd = parts[0].lower()
+
+        if subcmd == 'list' or subcmd == 'ls':
+            self._cmd_notes(parts[1] if len(parts) > 1 else '')
+            return
+
+        if subcmd == 'del' or subcmd == 'delete' or subcmd == 'rm' or subcmd == 'remove':
+            target = parts[1].strip() if len(parts) > 1 else ""
+            if not target or not target.isdigit():
+                ui.error("请指定要删除的笔记编号。用法: note del <编号>")
+                return
+            idx = int(target) - 1
+            if 0 <= idx < len(self.notes):
+                removed = self.notes.pop(idx)
+                ui.success(f"已删除笔记 [{idx + 1}]: {removed[:40]}{'...' if len(removed) > 40 else ''}")
+            else:
+                ui.error(f"无效的笔记编号，共有 {len(self.notes)} 条。")
+            return
+
+        if subcmd == 'search' or subcmd == 'find' or subcmd == 'grep':
+            keyword = (parts[1] if len(parts) > 1 else "").strip().lower()
+            if not keyword:
+                ui.error("请指定搜索关键词。用法: note search <关键词>")
+                return
+            self._cmd_notes(f"search {keyword}")
+            return
+
+        if subcmd == 'clear' or subcmd == 'empty':
+            if not self.notes:
+                ui.info("笔记本来就是空的。")
+                return
+            confirm = input(f"  确定删除全部 {len(self.notes)} 条笔记吗？(y/N): ").strip().lower()
+            if confirm in ('y', 'yes'):
+                self.notes.clear()
+                ui.success("已清空所有笔记。")
             return
 
         self.notes.append(args.strip())
-        ui.success(f"已记录笔记 (共 {len(self.notes)} 条)。")
+        ui.success(f"已记录笔记 [{len(self.notes)}]: {args.strip()[:50]}{'...' if len(args.strip()) > 50 else ''}")
 
     def _cmd_notes(self, args: str):
-        """查看笔记"""
+        """查看笔记 / 搜索笔记"""
         if not self._require_playing():
             return
-        ui.display_notes(self.notes)
+
+        if not self.notes:
+            ui.info("你还没有记录任何笔记。")
+            return
+
+        if args:
+            parts = args.split(maxsplit=1)
+            sub = parts[0].lower()
+            if sub == 'search' or sub == 'find':
+                keyword = (parts[1] if len(parts) > 1 else "").strip().lower()
+                if not keyword:
+                    ui.error("请输入搜索关键词。")
+                    return
+                matches = []
+                for i, note in enumerate(self.notes):
+                    if keyword in note.lower():
+                        matches.append((i + 1, note))
+                if not matches:
+                    ui.info(f"没有找到包含 '{keyword}' 的笔记。")
+                    return
+                ui.section(f"笔记搜索结果 (关键词: {keyword}, {len(matches)} 条)")
+                for i, note in matches:
+                    highlighted = note
+                    print(c(f"  [{i}] ", ui.Color.DIM) + highlighted)
+                print(c(f"  共 {len(matches)} / {len(self.notes)} 条匹配", ui.Color.DIM))
+                return
+
+        ui.section("笔记")
+        for i, note in enumerate(self.notes, 1):
+            print(c(f"  [{i}] ", ui.Color.DIM) + note)
+        print(c(f"  共 {len(self.notes)} 条笔记", ui.Color.DIM))
+        ui.info("提示: note del <编号> 删除，note search <关键词> 搜索")
 
     def _cmd_hint(self, args: str):
         """获取提示"""
@@ -933,6 +1075,90 @@ class Game:
         """清屏"""
         ui.clear_screen()
 
+    def _cmd_checklevel(self, args: str):
+        """校验关卡文件"""
+        if not args:
+            ui.error("请指定关卡文件路径。用法: checklevel <文件路径>")
+            custom_levels = LevelManager.list_level_files()
+            if custom_levels:
+                ui.info("检测到以下自定义关卡文件:")
+                for lv in custom_levels:
+                    print(c(f"    - {lv['filename']}", ui.Color.CYAN) +
+                          c(f" ({lv.get('level_name', '?')}, {lv.get('room_count', 0)}房间)", ui.Color.DIM))
+            return
+
+        path = args.strip()
+        if not os.path.exists(path):
+            guess_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "levels", path)
+            if os.path.exists(guess_path):
+                path = guess_path
+            else:
+                ui.error(f"关卡文件不存在: {path}")
+                return
+
+        ui.info(f"正在校验: {path}")
+        result = LevelChecker.check_file(path)
+        print()
+        print(LevelChecker.format_report(result))
+
+    def _cmd_profiles(self, args: str):
+        """显示关卡探索档案"""
+        all_profiles = LevelProfileManager.list_profiles()
+        current_id = self.level.id if self.level else None
+
+        if args:
+            target_id = args.strip()
+            all_profiles = [p for p in all_profiles if p.get('level_id') == target_id or p.get('level_name', '').find(target_id) >= 0]
+
+        if not all_profiles:
+            ui.info("还没有任何关卡的探索档案。\n  通关至少一个关卡后，档案就会自动建立。")
+            if self.level and current_id:
+                p = LevelProfileManager.get_profile(current_id)
+                if p.get('discovered_rooms') or p.get('solved_puzzles'):
+                    ui.info(f"当前关卡 '{self.level.name}' 已有部分探索记录:")
+                    ui.info(f"  已发现房间: {len(p.get('discovered_rooms', []))}")
+                    ui.info(f"  已解谜题: {len(p.get('solved_puzzles', []))}")
+            return
+
+        ui.title("关卡探索档案")
+        for i, p in enumerate(all_profiles, 1):
+            lvl_name = p.get('level_name', p.get('level_id', '?'))
+            mark = c("  ← 当前关卡", ui.Color.GREEN) if p.get('level_id') == current_id else ""
+            print(c(f"  {i}. ", ui.Color.DIM) + bold(lvl_name) + mark)
+            print(c(f"     ID: {p.get('level_id', '?')}  ", ui.Color.DIM) +
+                  c(f"挑战次数: {p.get('play_count', 0)}  ", ui.Color.CYAN) +
+                  c(f"通关次数: {p.get('completion_count', 0)}", ui.Color.YELLOW))
+            discovered = len(p.get('discovered_rooms', []))
+            solved = len(p.get('solved_puzzles', []))
+            total_r = 0
+            total_p = 0
+            try:
+                if p.get('level_id') == 'ancient_library':
+                    total_r = 9
+                    total_p = 1
+                elif self.level and self.level.id == p.get('level_id'):
+                    total_r = self._total_rooms()
+                    total_p = self._total_puzzles()
+            except Exception:
+                pass
+            disc_str = f"{discovered}/{total_r}" if total_r else str(discovered)
+            solv_str = f"{solved}/{total_p}" if total_p else str(solved)
+            print(c(f"     发现房间: {disc_str}  ", ui.Color.WHITE) +
+                  c(f"已解谜题: {solv_str}", ui.Color.WHITE))
+            best_score = p.get('best_score', 0)
+            best_steps = p.get('best_steps', '-')
+            best_time = p.get('best_time')
+            if best_time:
+                m, s = divmod(int(best_time), 60)
+                h, m = divmod(m, 60)
+                best_time_str = f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+            else:
+                best_time_str = '-'
+            print(c(f"     最高分: {best_score}  ", ui.Color.GREEN) +
+                  c(f"最少步数: {best_steps}  ", ui.Color.BLUE) +
+                  c(f"最快用时: {best_time_str}", ui.Color.MAGENTA))
+            print()
+
     def _handle_end_game(self):
         """处理游戏通关"""
         score = LeaderboardManager.calculate_score(
@@ -945,8 +1171,40 @@ class Game:
             total_puzzles=self._total_puzzles(),
         )
 
+        LevelProfileManager.record_discovery(
+            self.level.id, list(self.visited_rooms),
+            [p.id for room in self.level.rooms.values() for p in room.puzzles if p.solved]
+        )
+        profile_result = LevelProfileManager.update_profile_on_end(
+            self.level.id, self.steps, self._get_elapsed(), score
+        )
+        profile = profile_result['profile']
+        improvements = profile_result['improvements']
+        is_first = profile_result['is_first']
+
         room = self._get_current_room()
         ui.story(room.end_message)
+
+        if improvements or is_first:
+            print()
+            if is_first:
+                ui.success("🎉 首次通关！已建立探索档案。")
+            else:
+                ui.success("📊 成绩对比：")
+            for kind, old, new in improvements:
+                if kind == 'score':
+                    ui.info(f"  🏆 得分刷新纪录！{old} → {new} (+{new-old})")
+                elif kind == 'steps':
+                    ui.info(f"  👟 步数刷新纪录！{old} 步 → {new} 步 (-{old-new})")
+                elif kind == 'time':
+                    def fmt(s):
+                        m, s = divmod(int(s), 60)
+                        h, m = divmod(m, 60)
+                        return f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+                    delta = int(old - new)
+                    ui.info(f"  ⏱️  用时刷新纪录！{fmt(old)} → {fmt(new)} (-{delta}秒)")
+            if not improvements and not is_first:
+                pass
 
         player_name = ""
         while not player_name:

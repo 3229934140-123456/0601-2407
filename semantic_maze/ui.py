@@ -337,11 +337,14 @@ def display_help():
     title("命令帮助")
 
     print(bold("  游戏控制:"))
-    print(c("    start              ", Color.YELLOW) + c("- 开始新游戏 / 新建谜题", Color.DIM))
+    print(c("    start              ", Color.YELLOW) + c("- 开始新游戏 (从关卡列表中选择)", Color.DIM))
+    print(c("    start <路径>       ", Color.YELLOW) + c("- 直接从指定关卡文件开始", Color.DIM))
     print(c("    load [存档名]      ", Color.YELLOW) + c("- 读取存档", Color.DIM))
     print(c("    save [存档名]      ", Color.YELLOW) + c("- 保存游戏", Color.DIM))
     print(c("    quit / exit        ", Color.YELLOW) + c("- 退出游戏", Color.DIM))
     print(c("    help               ", Color.YELLOW) + c("- 显示此帮助", Color.DIM))
+    print(c("    status             ", Color.YELLOW) + c("- 显示游戏当前状态", Color.DIM))
+    print(c("    profiles / stats   ", Color.YELLOW) + c("- 查看关卡探索档案", Color.DIM))
     print()
 
     print(bold("  探索与移动:"))
@@ -365,6 +368,8 @@ def display_help():
     print(bold("  谜题与笔记:"))
     print(c("    answer / solve <答案>", Color.YELLOW) + c("- 输入谜题答案", Color.DIM))
     print(c("    note <内容>        ", Color.YELLOW) + c("- 记录线索笔记", Color.DIM))
+    print(c("    note del <编号>    ", Color.YELLOW) + c("- 删除指定笔记", Color.DIM))
+    print(c("    note search <关键词>", Color.YELLOW) + c("- 按关键词搜索笔记", Color.DIM))
     print(c("    notes              ", Color.YELLOW) + c("- 查看所有笔记", Color.DIM))
     print(c("    hint               ", Color.YELLOW) + c("- 获取提示 (有限次数)", Color.DIM))
     print()
@@ -376,6 +381,7 @@ def display_help():
 
     print(bold("  关卡编辑:"))
     print(c("    loadlevel <文件路径>", Color.YELLOW) + c("- 加载自定义关卡 JSON 文件", Color.DIM))
+    print(c("    checklevel <路径>  ", Color.YELLOW) + c("- 校验关卡文件的完整性", Color.DIM))
     print()
 
 
