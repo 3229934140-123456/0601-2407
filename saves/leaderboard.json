@@ -1,0 +1,22 @@
+[
+  {
+    "player_name": "TestPlayer_1781565970",
+    "level_id": "ancient_library",
+    "level_name": "古老图书馆的秘密",
+    "score": 11455,
+    "steps": 50,
+    "hints_used": 1,
+    "elapsed_seconds": 300,
+    "timestamp": "2026-06-16 07:26:10"
+  },
+  {
+    "player_name": "TestPlayer_1781568632",
+    "level_id": "ancient_library",
+    "level_name": "古老图书馆的秘密",
+    "score": 11455,
+    "steps": 50,
+    "hints_used": 1,
+    "elapsed_seconds": 300,
+    "timestamp": "2026-06-16 08:10:32"
+  }
+]

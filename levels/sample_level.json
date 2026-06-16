@@ -1,0 +1,74 @@
+{
+  "id": "mini_sample",
+  "name": "迷你示例：神秘小屋",
+  "description": "你醒来发现自己被困在一间陌生的小屋里...",
+  "start_room_id": "bedroom",
+  "max_hints": 3,
+  "combine_recipes": {
+    "rusty_key+oil_can": "working_key"
+  },
+  "items": [
+    {
+      "id": "rusty_key",
+      "name": "生锈的钥匙",
+      "description": "一把生了锈的旧钥匙，插不进锁孔。",
+      "aliases": ["钥匙", "旧钥匙"]
+    },
+    {
+      "id": "oil_can",
+      "name": "油罐",
+      "description": "一个小油罐，里面还有些润滑油。",
+      "aliases": ["油", "润滑油"]
+    },
+    {
+      "id": "working_key",
+      "name": "顺滑的钥匙",
+      "description": "上了油之后，钥匙变得光滑好用了。",
+      "aliases": ["好钥匙"]
+    },
+    {
+      "id": "note",
+      "name": "便签纸",
+      "description": "上面写着：密码是 1-2-3-4",
+      "aliases": ["便签", "纸条"]
+    }
+  ],
+  "rooms": [
+    {
+      "id": "bedroom",
+      "name": "卧室",
+      "description": "这是一间简单的卧室，有一张床和一个衣柜。",
+      "items": ["rusty_key", "note"],
+      "exits": [
+        {"direction": "east", "target_room_id": "kitchen", "description": "通往厨房"}
+      ],
+      "mechanisms": [],
+      "puzzles": []
+    },
+    {
+      "id": "kitchen",
+      "name": "厨房",
+      "description": "一间旧厨房，角落里放着一个油罐。",
+      "items": ["oil_can"],
+      "exits": [
+        {"direction": "west", "target_room_id": "bedroom", "description": "返回卧室"},
+        {"direction": "south", "target_room_id": "exit_room", "locked": true,
+         "lock_reason": "门锁着，需要一把好用的钥匙",
+         "unlock_item": "working_key", "description": "通向出口的门"}
+      ],
+      "mechanisms": [],
+      "puzzles": []
+    },
+    {
+      "id": "exit_room",
+      "name": "门廊",
+      "description": "你打开门，阳光照进来——你自由了！",
+      "items": [],
+      "is_end": true,
+      "end_message": "恭喜！你成功逃出了神秘小屋！",
+      "exits": [],
+      "mechanisms": [],
+      "puzzles": []
+    }
+  ]
+}
