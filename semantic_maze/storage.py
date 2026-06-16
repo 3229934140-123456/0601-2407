@@ -37,13 +37,15 @@ class SaveManager:
         return sorted(saves)
 
     @staticmethod
-    def save_game(slot_name: str, game_state: GameState, level_id: str) -> bool:
+    def save_game(slot_name: str, game_state: GameState, level_id: str,
+                  custom_level_path: Optional[str] = None) -> bool:
         """保存游戏"""
         SaveManager._ensure_dir()
         try:
             file_path = os.path.join(SAVES_DIR, f'{slot_name}.sav')
             data = {
                 'level_id': level_id,
+                'custom_level_path': custom_level_path,
                 'saved_at': time.strftime('%Y-%m-%d %H:%M:%S'),
                 'state': {
                     'current_room_id': game_state.current_room_id,

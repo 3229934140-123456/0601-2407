@@ -179,42 +179,7 @@ class Game:
         """保存当前状态快照（用于撤销）"""
         if not self.level:
             return
-        room_item_states = {}
-        for room_id, room in self.level.rooms.items():
-            room_item_states[room_id] = list(room.items)
-
-        exit_states = {}
-        for room_id, room in self.level.rooms.items():
-            exit_states[room_id] = {}
-            for direction, exit_obj in room.exits.items():
-                exit_states[room_id][direction] = {
-                    'locked': exit_obj.locked,
-                    'hidden': exit_obj.hidden,
-                }
-
-        solved_puzzles = []
-        triggered_mechanisms = []
-        for room in self.level.rooms.values():
-            for p in room.puzzles:
-                if p.solved:
-                    solved_puzzles.append(p.id)
-            for m in room.mechanisms:
-                if m.triggered:
-                    triggered_mechanisms.append(m.id)
-
-        state = GameState(
-            current_room_id=self.current_room_id,
-            inventory=list(self.inventory),
-            visited_rooms=list(self.visited_rooms),
-            notes=list(self.notes),
-            hints_used=self.hints_used,
-            steps=self.steps,
-            elapsed_seconds=self._get_elapsed(),
-            solved_puzzles=solved_puzzles,
-            triggered_mechanisms=triggered_mechanisms,
-            room_item_states=room_item_states,
-            exit_states=exit_states,
-        )
+        state = self._collect_state()
         self.history.append(state)
 
     def _get_elapsed(self) -> float:
@@ -372,21 +337,24 @@ class Game:
 
         level_id = data.get('level_id')
         state_dict = data.get('state')
+        custom_level_path = data.get('custom_level_path')
         if not level_id or not state_dict:
             ui.error("存档数据损坏。")
             return
 
-        if self.custom_level_path:
-            self.level = LevelLoader.load_from_file(self.custom_level_path)
+        if custom_level_path:
+            if not os.path.exists(custom_level_path):
+                ui.error(f"存档关联的自定义关卡文件不存在: {custom_level_path}")
+                return
+            self.level = LevelLoader.load_from_file(custom_level_path)
+            self.custom_level_path = custom_level_path
         else:
             level_data = default_level.get_default_level()
             self.level = LevelLoader.load_from_dict(level_data)
+            self.custom_level_path = None
 
         if not self.level or self.level.id != level_id:
-            if self.custom_level_path:
-                ui.error(f"存档需要的关卡与当前自定义关卡不匹配。")
-            else:
-                ui.error(f"存档关卡不匹配。")
+            ui.error(f"存档关卡不匹配 (期望 {level_id}，实际 {self.level.id if self.level else 'None'})。")
             return
 
         self._restore_state(state_dict)
@@ -435,6 +403,45 @@ class Game:
 
         self.history.clear()
 
+    def _collect_state(self) -> GameState:
+        """收集当前完整游戏状态"""
+        room_item_states = {}
+        for room_id, room in self.level.rooms.items():
+            room_item_states[room_id] = list(room.items)
+
+        exit_states = {}
+        for room_id, room in self.level.rooms.items():
+            exit_states[room_id] = {}
+            for direction, exit_obj in room.exits.items():
+                exit_states[room_id][direction] = {
+                    'locked': exit_obj.locked,
+                    'hidden': exit_obj.hidden,
+                }
+
+        solved_puzzles = []
+        triggered_mechanisms = []
+        for room in self.level.rooms.values():
+            for p in room.puzzles:
+                if p.solved:
+                    solved_puzzles.append(p.id)
+            for m in room.mechanisms:
+                if m.triggered:
+                    triggered_mechanisms.append(m.id)
+
+        return GameState(
+            current_room_id=self.current_room_id,
+            inventory=list(self.inventory),
+            visited_rooms=list(self.visited_rooms),
+            notes=list(self.notes),
+            hints_used=self.hints_used,
+            steps=self.steps,
+            elapsed_seconds=self._get_elapsed(),
+            solved_puzzles=solved_puzzles,
+            triggered_mechanisms=triggered_mechanisms,
+            room_item_states=room_item_states,
+            exit_states=exit_states,
+        )
+
     def _cmd_save(self, args: str):
         """保存游戏"""
         if not self._require_playing():
@@ -447,21 +454,9 @@ class Game:
             default_name = f"save_{int(time.time())}"
             args = input(f"  存档名称 [{default_name}]: ").strip() or default_name
 
-        state = GameState(
-            current_room_id=self.current_room_id,
-            inventory=list(self.inventory),
-            visited_rooms=list(self.visited_rooms),
-            notes=list(self.notes),
-            hints_used=self.hints_used,
-            steps=self.steps,
-            elapsed_seconds=self._get_elapsed(),
-            solved_puzzles=[],
-            triggered_mechanisms=[],
-            room_item_states={},
-            exit_states={},
-        )
+        state = self._collect_state()
 
-        if SaveManager.save_game(args, state, self.level.id):
+        if SaveManager.save_game(args, state, self.level.id, self.custom_level_path):
             ui.success(f"游戏已保存为: {args}")
         else:
             ui.error("保存失败。")
